@@ -1,0 +1,31 @@
+# Virtual environment
+myenv310/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*.pyo
+*$py.class
+
+# Environment variable / secrets
+.env
+*.env
+
+# Log files
+*.log
+
+# Flask instance folder (optional, jika digunakan)
+instance/
+
+# Jupyter checkpoints (jika kamu pakai notebook)
+.ipynb_checkpoints/
+
+# VSCode settings (opsional)
+.vscode/
+
+# Model artifacts (opsional, jika tidak mau disimpan di git)
+*.joblib
+*.keras
+
+# macOS system files
+.DS_Store
