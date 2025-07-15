@@ -23,9 +23,5 @@ instance/
 # VSCode settings (opsional)
 .vscode/
 
-# Model artifacts (opsional, jika tidak mau disimpan di git)
-*.joblib
-*.keras
-
 # macOS system files
 .DS_Store
