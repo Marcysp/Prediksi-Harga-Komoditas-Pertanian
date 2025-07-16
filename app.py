@@ -289,7 +289,7 @@ def forecast_bawang_putih(data):
         harga_scaled = scaler_bawang_putih.transform(boxcox_transformed.reshape(-1, 1))
 
         # Buat input untuk prediksi
-        look_back = 180
+        look_back = 90
         preds_scaled = []
         input_seq = create_input_sequence(harga_scaled, look_back)
         steps = 90  # Jumlah langkah prediksi
