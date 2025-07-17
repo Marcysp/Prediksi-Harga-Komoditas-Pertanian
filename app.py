@@ -252,19 +252,19 @@ def forecast_cabe_besar(data, order=(2,0,2), seasonal_order=(1,0,1,30), steps=90
     nama_komoditas = 'Cabe Merah Besar'
     return forecast_mean, nama_komoditas
 
-def forecast_cabe_rawit(data, order=(2,0,2), seasonal_order=(1,0,1,30), steps=90):
-    global model_cabe_besar
+# def forecast_cabe_rawit(data, order=(2,0,2), seasonal_order=(1,0,1,30), steps=90):
+#     global model_cabe_besar
 
-    cabe_besar_data = data[data['komoditas_nama'] == 'Cabe Merah Besar'].copy()
-    # Gunakan hanya kolom harga
-    harga_series = cabe_besar_data['harga']
+#     cabe_besar_data = data[data['komoditas_nama'] == 'Cabe Merah Besar'].copy()
+#     # Gunakan hanya kolom harga
+#     harga_series = cabe_besar_data['harga']
     
-    model_cabe_besar = SARIMAX(harga_series, order=order, seasonal_order=seasonal_order,
-                    enforce_stationarity=False, enforce_invertibility=False)
-    results = model_cabe_besar.fit()
-    forecast = results.get_forecast(steps=steps)
-    forecast_mean = forecast.predicted_mean
-    return forecast_mean
+#     model_cabe_besar = SARIMAX(harga_series, order=order, seasonal_order=seasonal_order,
+#                     enforce_stationarity=False, enforce_invertibility=False)
+#     results = model_cabe_besar.fit()
+#     forecast = results.get_forecast(steps=steps)
+#     forecast_mean = forecast.predicted_mean
+#     return forecast_mean
 
 # Fungsi untuk membuat input sequence
 def create_input_sequence(data, look_back=60):
@@ -294,11 +294,6 @@ def forecast_bawang_putih(data):
         input_seq = create_input_sequence(harga_scaled, look_back)
         steps = 90  # Jumlah langkah prediksi
 
-        # for _ in range(steps):
-        #     pred = model.predict(input_seq, verbose=0)
-        #     preds_scaled.append(pred[0][0])
-        #     input_seq = np.append(input_seq[:, 1:, :], [[[pred[0][0]]]], axis=1)
-        # Lakukan prediksi sekali saja
         preds_scaled = model_bawang_putih.predict(input_seq)
 
         # Invers transformasi
@@ -336,7 +331,7 @@ def forecast_cabe_rawit(data):
         harga_scaled = scaler_cabe_rawit.transform(boxcox_transformed.reshape(-1, 1))
 
         # Buat input untuk prediksi
-        look_back = 180
+        look_back = 900
         preds_scaled = []
         input_seq = create_input_sequence(harga_scaled, look_back)
         steps = 90  # Jumlah langkah prediksi
