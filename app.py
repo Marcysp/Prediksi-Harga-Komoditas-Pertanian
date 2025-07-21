@@ -209,7 +209,7 @@ def forecast_tomat_merah(data=None, steps=90):
     harga_series = tomat_merah_data['harga']
 
     # Cek apakah sudah lewat 7 hari dari terakhir optimasi
-    if last_optimized_tomat_merah is None or (datetime.now().date() - last_optimized_tomat_merah).days >= 7:
+    if last_optimized_tomat_merah is None or (datetime.now().date() - last_optimized_tomat_merah).days >= 4:
         print("🔁 Re-optimizing parameters...")
         optimized_params_tomat_merah = optimize_ets(
             harga_series.iloc[:-90],
