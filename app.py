@@ -171,7 +171,7 @@ def forecast_bawang_merah(data=None, steps=90):
     harga_series = bawang_merah_data['harga']
 
     # Cek apakah sudah lewat 7 hari dari terakhir optimasi
-    if last_optimized_bawang_merah is None or (datetime.now().date() - last_optimized_bawang_merah).days >= 7:
+    if last_optimized_bawang_merah is None or (datetime.now().date() - last_optimized_bawang_merah).days >= 4:
         print("🔁 Re-optimizing parameters...")
         optimized_params_bawang_merah = optimize_ets(
             harga_series.iloc[:-90],
@@ -389,7 +389,101 @@ def insert_data(values, nama_komoditas):
         print(f"❌ Gagal simpan ke database: {e}")
         return jsonify({'error': f"Gagal simpan ke database: {str(e)}"}), 500
 
-        # Gabung ke dalam 1
+@app.route('/api/forecast/<komoditas>', methods=['GET'])
+def get_forecast_by_komoditas(komoditas):
+    query = text("""
+        SELECT *
+        FROM hasil_prediksi
+        WHERE nama_komoditas = :komoditas
+        ORDER BY tanggal DESC
+        LIMIT 1
+    """)
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(query, {"komoditas": komoditas}).mappings().fetchone()
+            if result is None:
+                return jsonify({"error": "Data tidak ditemukan"}), 404
+            return jsonify(dict(result))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/harga', methods=['GET'])
+def get_harga_komoditas():
+    komoditas = request.args.get('komoditas')
+    tanggal = request.args.get('tanggal', datetime.today().strftime('%Y-%m-%d'))
+    pasar = request.args.get('pasar')  # opsional
+    kab_kota = request.args.get('kab_kota')  # opsional
+
+    if not komoditas:
+        return jsonify({'error': 'Parameter "komoditas" wajib diisi'}), 400
+
+    try:
+        query = """
+            SELECT 
+                kmd.tanggal,
+                kmd.komoditas_nama,
+                kmd.satuan,
+                kmd.harga,
+                psr.psr_nama AS pasar,
+                kab.kab_nama AS kab_kota
+            FROM komoditas kmd
+            JOIN pasar psr ON psr.id = kmd.pasar_id
+            JOIN kab_kota kab ON kab.id = psr.kabkota_id
+            WHERE kmd.komoditas_nama ILIKE :komoditas
+              AND kmd.tanggal = :tanggal
+        """
+
+        params = {
+            "komoditas": komoditas,
+            "tanggal": tanggal
+        }
+
+        if pasar:
+            query += " AND psr.psr_nama ILIKE :pasar"
+            params["pasar"] = pasar
+
+        if kab_kota:
+            query += " AND kab.kab_nama ILIKE :kab_kota"
+            params["kab_kota"] = kab_kota
+
+        query += " ORDER BY kmd.harga DESC"
+
+        with engine.connect() as conn:
+            result = conn.execute(text(query), params).mappings().fetchall()
+            return jsonify([dict(row) for row in result])
+
+    except Exception as e:
+        return jsonify({'error': f'Gagal mengambil data harga: {str(e)}'}), 500
+
+@app.route('/api/kabupaten', methods=['GET'])
+def get_kabupaten():
+    try:
+        query = text("SELECT DISTINCT kab_nama FROM kab_kota ORDER BY kab_nama;")
+        with engine.connect() as conn:
+            result = conn.execute(query).fetchall()
+            return jsonify([row[0] for row in result])
+    except Exception as e:
+        return jsonify({'error': f'Gagal mengambil data kabupaten: {str(e)}'}), 500
+
+@app.route('/api/pasar', methods=['GET'])
+def get_pasar_by_kota():
+    kota = request.args.get('kota')
+    if not kota:
+        return jsonify({'error': 'Parameter "kota" wajib diisi'}), 400
+    try:
+        query = text("""
+            SELECT psr.psr_nama
+            FROM pasar psr
+            JOIN kab_kota kab ON kab.id = psr.kabkota_id
+            WHERE kab.kab_nama ILIKE :kota
+            ORDER BY psr.psr_nama
+        """)
+        with engine.connect() as conn:
+            result = conn.execute(query, {'kota': kota}).fetchall()
+            return jsonify([row[0] for row in result])
+    except Exception as e:
+        return jsonify({'error': f'Gagal mengambil data pasar: {str(e)}'}), 500
+
 @app.route('/forecast', methods=['GET'])
 def forecast():
     global data
@@ -413,15 +507,6 @@ def forecast():
             print(f"❌ Gagal menyimpan hasil dari {func.__name__}: {e}")
 
     return jsonify({'status': '✅ Semua prediksi selesai diproses'})
-    # return jsonify({
-    #     # 'forecast_dates': dates,
-    #     'forecast_values': values,
-    # })
-    # return jsonify({
-    #     'forecast_dates': forecast_result.index.strftime('%Y-%m-%d').tolist(),
-    #     'forecast_values': forecast_result.tolist(),
-    #     'last_optimized': last_optimized.strftime('%Y-%m-%d') if last_optimized else None
-    # })
 
 # Menjalankan aplikasi
 if __name__ == '__main__':
