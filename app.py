@@ -145,22 +145,162 @@ def get_hasil_prediksi_columns():
 
 @app.route('/data', methods=['GET'])
 def get_data():
-    # query = '''
-    #     SELECT *
-    #     FROM hasil_prediksi where tanggal <= current_date - interval '30 days';
-    # '''
-    query = '''
-        SELECT * FROM hasil_prediksi;
+    today = datetime.today().isoformat()  # hasilnya '2025-07-22'
+
+    query = f'''
+        SELECT * FROM hasil_prediksi
+        WHERE tanggal = '{today}'
     '''
     data = pd.read_sql(query, engine)
+
     data['tanggal'] = pd.to_datetime(data['tanggal'])
     data.set_index('tanggal', inplace=True)
 
-    # Convert to JSON format
-    data_json = data.to_dict(orient='records')
-    return jsonify(data_json)
+    return jsonify(data.to_dict(orient='records'))
 
-# 
+@app.route('/api/periodic-data', methods=['GET'])
+def get_periodic_data():
+    tanggal = request.args.get('tanggal', datetime.today().strftime('%Y-%m-%d'))
+
+    # Query prediksi
+    query_prediksi = f'''
+        SELECT 
+            tanggal,
+            nama_komoditas,
+            val_1,
+            val_7,
+            val_30,
+            val_90
+        FROM hasil_prediksi
+        WHERE tanggal = '{tanggal}'
+    '''
+    df_prediksi = pd.read_sql(query_prediksi, engine)
+
+    # Query harga aktual dari komoditas_rata-rata
+    query_aktual = f'''
+        SELECT 
+            komoditas_nama,
+            harga,
+            created_at
+        FROM "komoditas_rata-rata"
+        WHERE DATE(created_at) = '{tanggal}'
+    '''
+    df_aktual = pd.read_sql(query_aktual, engine)
+
+    # Gabungkan berdasarkan nama komoditas
+    df_merged = pd.merge(df_prediksi, df_aktual, how='left',
+                         left_on='nama_komoditas', right_on='komoditas_nama')
+
+    # Hapus kolom duplikat dan rapikan
+    df_merged = df_merged[[
+        'tanggal',
+        'nama_komoditas',
+        'val_1',
+        'val_7',
+        'val_30',
+        'val_90',
+        'harga'  # ini adalah harga aktual
+    ]]
+
+    df_merged['tanggal'] = pd.to_datetime(df_merged['tanggal']).dt.strftime('%Y-%m-%d')
+
+    return jsonify(df_merged.to_dict(orient='records'))
+
+@app.route('/api/forecast/<komoditas>', methods=['GET'])
+def get_forecast_by_komoditas(komoditas):
+    query = text("""
+        SELECT *
+        FROM hasil_prediksi
+        WHERE nama_komoditas = :komoditas
+        ORDER BY tanggal DESC
+        LIMIT 1
+    """)
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(query, {"komoditas": komoditas}).mappings().fetchone()
+            if result is None:
+                return jsonify({"error": "Data tidak ditemukan"}), 404
+            return jsonify(dict(result))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/harga', methods=['GET'])
+def get_harga_komoditas():
+    komoditas = request.args.get('komoditas')
+    tanggal = request.args.get('tanggal', datetime.today().strftime('%Y-%m-%d'))
+    pasar = request.args.get('pasar')  # opsional
+    kab_kota = request.args.get('kab_kota')  # opsional
+
+    if not komoditas:
+        return jsonify({'error': 'Parameter "komoditas" wajib diisi'}), 400
+
+    try:
+        query = """
+            SELECT 
+                kmd.tanggal,
+                kmd.komoditas_nama,
+                kmd.satuan,
+                kmd.harga,
+                psr.psr_nama AS pasar,
+                kab.kab_nama AS kab_kota
+            FROM komoditas kmd
+            JOIN pasar psr ON psr.id = kmd.pasar_id
+            JOIN kab_kota kab ON kab.id = psr.kabkota_id
+            WHERE kmd.komoditas_nama ILIKE :komoditas
+              AND kmd.tanggal = :tanggal
+        """
+
+        params = {
+            "komoditas": komoditas,
+            "tanggal": tanggal
+        }
+
+        if pasar:
+            query += " AND psr.psr_nama ILIKE :pasar"
+            params["pasar"] = pasar
+
+        if kab_kota:
+            query += " AND kab.kab_nama ILIKE :kab_kota"
+            params["kab_kota"] = kab_kota
+
+        query += " ORDER BY kmd.harga DESC"
+
+        with engine.connect() as conn:
+            result = conn.execute(text(query), params).mappings().fetchall()
+            return jsonify([dict(row) for row in result])
+
+    except Exception as e:
+        return jsonify({'error': f'Gagal mengambil data harga: {str(e)}'}), 500
+
+@app.route('/api/kabupaten', methods=['GET'])
+def get_kabupaten():
+    try:
+        query = text("SELECT DISTINCT kab_nama FROM kab_kota ORDER BY kab_nama;")
+        with engine.connect() as conn:
+            result = conn.execute(query).fetchall()
+            return jsonify([row[0] for row in result])
+    except Exception as e:
+        return jsonify({'error': f'Gagal mengambil data kabupaten: {str(e)}'}), 500
+
+@app.route('/api/pasar', methods=['GET'])
+def get_pasar_by_kota():
+    kota = request.args.get('kota')
+    if not kota:
+        return jsonify({'error': 'Parameter "kota" wajib diisi'}), 400
+    try:
+        query = text("""
+            SELECT psr.psr_nama
+            FROM pasar psr
+            JOIN kab_kota kab ON kab.id = psr.kabkota_id
+            WHERE kab.kab_nama ILIKE :kota
+            ORDER BY psr.psr_nama
+        """)
+        with engine.connect() as conn:
+            result = conn.execute(query, {'kota': kota}).fetchall()
+            return jsonify([row[0] for row in result])
+    except Exception as e:
+        return jsonify({'error': f'Gagal mengambil data pasar: {str(e)}'}), 500
+
 def forecast_bawang_merah(data=None, steps=90):
     global model_bawang_merah, last_optimized_bawang_merah, optimized_params_bawang_merah
 
@@ -389,101 +529,7 @@ def insert_data(values, nama_komoditas):
         print(f"❌ Gagal simpan ke database: {e}")
         return jsonify({'error': f"Gagal simpan ke database: {str(e)}"}), 500
 
-@app.route('/api/forecast/<komoditas>', methods=['GET'])
-def get_forecast_by_komoditas(komoditas):
-    query = text("""
-        SELECT *
-        FROM hasil_prediksi
-        WHERE nama_komoditas = :komoditas
-        ORDER BY tanggal DESC
-        LIMIT 1
-    """)
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(query, {"komoditas": komoditas}).mappings().fetchone()
-            if result is None:
-                return jsonify({"error": "Data tidak ditemukan"}), 404
-            return jsonify(dict(result))
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/harga', methods=['GET'])
-def get_harga_komoditas():
-    komoditas = request.args.get('komoditas')
-    tanggal = request.args.get('tanggal', datetime.today().strftime('%Y-%m-%d'))
-    pasar = request.args.get('pasar')  # opsional
-    kab_kota = request.args.get('kab_kota')  # opsional
-
-    if not komoditas:
-        return jsonify({'error': 'Parameter "komoditas" wajib diisi'}), 400
-
-    try:
-        query = """
-            SELECT 
-                kmd.tanggal,
-                kmd.komoditas_nama,
-                kmd.satuan,
-                kmd.harga,
-                psr.psr_nama AS pasar,
-                kab.kab_nama AS kab_kota
-            FROM komoditas kmd
-            JOIN pasar psr ON psr.id = kmd.pasar_id
-            JOIN kab_kota kab ON kab.id = psr.kabkota_id
-            WHERE kmd.komoditas_nama ILIKE :komoditas
-              AND kmd.tanggal = :tanggal
-        """
-
-        params = {
-            "komoditas": komoditas,
-            "tanggal": tanggal
-        }
-
-        if pasar:
-            query += " AND psr.psr_nama ILIKE :pasar"
-            params["pasar"] = pasar
-
-        if kab_kota:
-            query += " AND kab.kab_nama ILIKE :kab_kota"
-            params["kab_kota"] = kab_kota
-
-        query += " ORDER BY kmd.harga DESC"
-
-        with engine.connect() as conn:
-            result = conn.execute(text(query), params).mappings().fetchall()
-            return jsonify([dict(row) for row in result])
-
-    except Exception as e:
-        return jsonify({'error': f'Gagal mengambil data harga: {str(e)}'}), 500
-
-@app.route('/api/kabupaten', methods=['GET'])
-def get_kabupaten():
-    try:
-        query = text("SELECT DISTINCT kab_nama FROM kab_kota ORDER BY kab_nama;")
-        with engine.connect() as conn:
-            result = conn.execute(query).fetchall()
-            return jsonify([row[0] for row in result])
-    except Exception as e:
-        return jsonify({'error': f'Gagal mengambil data kabupaten: {str(e)}'}), 500
-
-@app.route('/api/pasar', methods=['GET'])
-def get_pasar_by_kota():
-    kota = request.args.get('kota')
-    if not kota:
-        return jsonify({'error': 'Parameter "kota" wajib diisi'}), 400
-    try:
-        query = text("""
-            SELECT psr.psr_nama
-            FROM pasar psr
-            JOIN kab_kota kab ON kab.id = psr.kabkota_id
-            WHERE kab.kab_nama ILIKE :kota
-            ORDER BY psr.psr_nama
-        """)
-        with engine.connect() as conn:
-            result = conn.execute(query, {'kota': kota}).fetchall()
-            return jsonify([row[0] for row in result])
-    except Exception as e:
-        return jsonify({'error': f'Gagal mengambil data pasar: {str(e)}'}), 500
-
+        # Gabung ke dalam 1
 @app.route('/forecast', methods=['GET'])
 def forecast():
     global data
