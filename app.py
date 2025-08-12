@@ -188,8 +188,13 @@ def get_periodic_data():
     df_aktual = pd.read_sql(query_aktual, engine)
 
     # Gabungkan berdasarkan nama komoditas
-    df_merged = pd.merge(df_prediksi, df_aktual, how='left',
-                         left_on='nama_komoditas', right_on='komoditas_nama')
+    df_merged = pd.merge(
+        df_prediksi, 
+        df_aktual, 
+        how='left',
+        left_on='nama_komoditas', 
+        right_on='komoditas_nama'
+    )
 
     # Hapus kolom duplikat dan rapikan
     df_merged = df_merged[[
@@ -199,12 +204,16 @@ def get_periodic_data():
         'val_7',
         'val_30',
         'val_90',
-        'harga'  # ini adalah harga aktual
+        'harga'  # harga aktual
     ]]
 
     df_merged['tanggal'] = pd.to_datetime(df_merged['tanggal']).dt.strftime('%Y-%m-%d')
 
+    # Ganti NaN jadi None (supaya keluar null di JSON)
+    df_merged = df_merged.where(pd.notnull(df_merged), None)
+
     return jsonify(df_merged.to_dict(orient='records'))
+
 
 @app.route('/api/forecast/<komoditas>', methods=['GET'])
 def get_forecast_by_komoditas(komoditas):
